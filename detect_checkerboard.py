@@ -7,8 +7,15 @@ import rospy
 bridge = CvBridge()
 
 # Checkerboard dimensions (inner corners)
-CHECKERBOARD = (7, 6)
-square_size = 0.024  # meters
+CHECKERBOARD = (7, 7)
+square_size = 0.0225  # meters
+
+#Import K and D
+import yaml
+with open('camera_calibration.yaml', 'r') as f:
+    calib_data = yaml.safe_load(f)
+K = np.array(calib_data['camera_matrix']['data']).reshape(3, 3)
+D = np.array(calib_data['distortion_coefficents']['data'])
 
 def image_callback(msg):
     frame = bridge.imgmsg_to_cv2(msg, "bgr8")
@@ -21,7 +28,7 @@ def image_callback(msg):
         cv2.drawChessboardCorners(frame, CHECKERBOARD, corners2, ret)
         cv2.imshow('Detected Checkerboard', frame)
         cv2.waitKey(1)
-def checkerboard_3D_pose():
+
     # 3D points in checkerboard frame
     objp = np.zeros((CHECKERBOARD[0]*CHECKERBOARD[1],3), np.float32)
     objp[:,:2] = np.mgrid[0:CHECKERBOARD[0],0:CHECKERBOARD[1]].T.reshape(-1,2)
@@ -35,6 +42,7 @@ def checkerboard_3D_pose():
     #Transfrom and Publish Pose
     import tf2_ros
     import geometry_msgs.msg
+    import tf
 
     br = tf2_ros.TransformBroadcaster()
     t = geometry_msgs.msg.TransformStamped()
