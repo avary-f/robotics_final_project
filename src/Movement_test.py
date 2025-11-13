@@ -167,7 +167,7 @@ def record_end_effector_orientation(limb):
 
 
 
-def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=60.0):
+def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=30.0):
     """
     Move Baxter to the target joint angles q_des iteratively until the end-effector
     reaches the target position within a specified tolerance or timeout is exceeded.
