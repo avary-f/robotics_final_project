@@ -1,8 +1,11 @@
 ## This file is meant to test Baxter movement
 
-## First task will be to just go to a point in space
 
-## Second task will be to let us move the arm and get the q using ik 
+## To try the new IK function, intall TRAC-IK 
+# sudo apt install ros-<distro>-trac-ik
+# pip install trac-ik-python
+
+
 
 #system level imports
 import sys, os
@@ -21,6 +24,7 @@ from rad_baxter_limb.rad_baxter_limb import RadBaxterLimb
 from baxter_pykdl import baxter_kinematics as b_kin
 import rospy
 import tf
+import trac_ik_python.trac_ik as trac_ik
 
 
 class CalibrationData:
@@ -62,7 +66,7 @@ def calibrate_corners(num_trials, limb):
 
 
 
-def calculate_position(position, limb, calibration, tip_orientation):
+def calculate_position(position, limb, calibration, tip_orientation, ik_solver, nominal):
     num_squares_x = 8
     num_squares_y = 8
 
@@ -106,7 +110,13 @@ def calculate_position(position, limb, calibration, tip_orientation):
 
 
     # calculate the calculated q_des 
-    q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
+    # q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
+
+    q_des_list = ik_solver.get_ik(nominal.tolist(), target.tolist(), tip_orientation)
+
+    if q_des_list is None:
+        raise RuntimeError("TRAC-IK could not find a solution for the target")
+    q_des = np.array(q_des_list)
 
     return q_des, target
 
@@ -214,11 +224,26 @@ def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.00
 if __name__ == '__main__':
     rospy.init_node('me_537_lab')
     limb = RadBaxterLimb('right')
+    # Use the Baxter URDF or KDL chain if available; here is a simple example:
+    base_link = 'base'       # Replace with Baxter base link name
+    tip_link = 'right_gripper'  # Replace with Baxter tip link
+    urdf_string = limb.get_urdf()  # Or load from file if available
+
+    # Joint limits (optional, can be read from Baxter URDF)
+    lower_limits = [-3.05, -1.70, -3.05, -1.70, -3.05, -1.70, -3.05]
+    upper_limits = [3.05, 1.70, 3.05, 1.70, 3.05, 1.70, 3.05]
+    nominal = np.zeros(7)
+
+    ik_solver = trac_ik.IK(base_link, tip_link, urdf_string,
+                        lower_limits, upper_limits, nominal)
+
+
 
     calibration = calibrate_corners(4, limb)
     desired_quat = record_end_effector_orientation(limb)
     desired_chess_location = get_user_chess_position()
-    q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+    # q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+    q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat, ik_solver, nominal)
     move_to_q_des(limb, q_des, target, speed=.25)
 
     
