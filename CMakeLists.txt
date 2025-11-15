@@ -11,6 +11,9 @@ find_package(catkin REQUIRED COMPONENTS
   baxter_interface
   rospy
   std_msgs
+  visualization_msgs
+  tf2_ros
+
 )
 
 ## System dependencies are found with CMake's conventions
@@ -159,10 +162,12 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
-#   src/Gripper_Alyssa.py
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+ catkin_install_python(PROGRAMS
+   src/Gripper_Alyssa.py
+   src/checkerboard_pose_publisher.py
+   src/checkerboard_mesh_publisher.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
@@ -191,6 +196,15 @@ include_directories(
 #   # myfile2
 #   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 # )
+
+# Install mesh files so RViz can load them via package:// URL
+install(DIRECTORY meshes/
+        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/meshes)
+
+#Install launch files
+install(DIRECTORY launch/
+        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
+
 
 #############
 ## Testing ##
