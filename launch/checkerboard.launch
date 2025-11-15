@@ -1,4 +1,0 @@
-<launch>
-  <node pkg="robotics_final_project" type="checkerboard_pose_publisher.py" name="pose_pub" output="screen"/>
-  <node pkg="robotics_final_project" type="checkerboard_mesh_publisher.py" name="mesh_pub" output="screen"/>
-</launch>
