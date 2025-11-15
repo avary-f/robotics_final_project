@@ -9,7 +9,7 @@ def publish_mesh():
     marker = Marker()
     marker.header.frame_id = "checkerboard"   # Must match TF frame from your pose publisher
     marker.type = Marker.MESH_RESOURCE
-    marker.mesh_resource = "package://robotics_final_project/meshes/checkerboard.obj"
+    marker.mesh_resource = "package://chess_master/meshes/checkerboard.obj"
     marker.mesh_use_embedded_materials = True
     marker.action = Marker.ADD
     marker.scale.x = 1.0
