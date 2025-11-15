@@ -2,8 +2,8 @@ import numpy as np
 # from baxter_pykdl import baxter_kinematics as b_kin
 
 # VizScene imports
-import kinematics as kin
-from visualization import VizScene
+import src.kinematics as kin
+from src.visualization import VizScene
 import kinematics_baxter as kin_baxter
 
 

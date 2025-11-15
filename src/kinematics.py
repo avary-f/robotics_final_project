@@ -15,7 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Callable, Iterable
 import transforms as tr
-from visualization import VizScene
+from src.visualization import VizScene
 from utility import skew
 
 
@@ -464,7 +464,7 @@ class SerialArm:
 
 
 if __name__ == "__main__":
-    from visualization import VizScene
+    from src.visualization import VizScene
     np.set_printoptions(precision=4, suppress=True)
 
     # Defining a table of DH parameters where each row corresponds to another joint.
