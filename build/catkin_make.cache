@@ -1,0 +1,2 @@
+chess_master
+-DCATKIN_DEVEL_PREFIX=/home/radlab/Documents/robotics_final_project/devel -DCMAKE_INSTALL_PREFIX=/home/radlab/Documents/robotics_final_project/install -G Unix Makefiles
