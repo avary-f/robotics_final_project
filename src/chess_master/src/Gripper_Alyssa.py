@@ -6,7 +6,7 @@ from baxter_interface import Gripper
 rospy.init_node('minimal_gripper_client')
 
 # Choose left or right arm
-arm = 'righ'
+arm = 'right'
 gripper = Gripper(arm)
 
 # Calibrate if needed
