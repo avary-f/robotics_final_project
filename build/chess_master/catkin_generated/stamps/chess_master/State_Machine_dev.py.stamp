@@ -23,12 +23,33 @@ import rospy
 import tf
 import actionlib
 from control_msgs.msg import GripperCommandAction, GripperCommandGoal
+from enum import Enum
+
+
+
+# ------------------- CONFIGURABLE PARAMETERS -------------------
+GRIPPER_CLOSED = 20   # 0 = fully closed, adjust as needed
+GRIPPER_OPEN = 70    # 100 = fully open
+# VERTICAL_OFFSET = 0.3048  # 1 foot in meters
+VERTICAL_OFFSET = .05
+A0_Y_OFFSET = -0.127      # 5 inches below board in meters
 
 
 class CalibrationData:
     def __init__(self, angular=None, cartesian=None):
         self.angular = angular
         self.cartesian = cartesian
+
+class State(Enum):
+    CALIBRATE = "CALIBRATE"
+    MOVE_TO_BOARD = "MOVE_TO_BOARD"
+    START_MOVEMENT = 'START_MOVEMENT'
+    GRAB_PIECE = "GRAB_PIECE"
+    PICK_UP = "PICK_UP"
+    NEXT_MOVE = "NEXT_MOVE"
+    PUT_DOWN = "PUT_DOWN"
+    RESET = "RESET"
+
 
 
 def create_gripper_client(side="right"):
@@ -88,9 +109,7 @@ def calibrate_corners(num_trials, limb):
     # Return as CalibrationData object
     return CalibrationData(angular_calibration, cartesian_calibration)
 
-
-
-def calculate_position(position, limb, calibration, tip_orientation):
+def calculate_position(position, limb, calibration, tip_orientation, vertical_offset=VERTICAL_OFFSET):
     num_squares_x = 8
     num_squares_y = 8
 
@@ -107,37 +126,32 @@ def calculate_position(position, limb, calibration, tip_orientation):
     board_width = np.linalg.norm(vect_x)
     board_height = np.linalg.norm(vect_y)
 
-    square_width = board_width / num_squares_x
-    square_height = board_height / num_squares_y
+    # Special case: "A0" goes above center of the board, 5 inches below board surface
+    if isinstance(position, str) and position.upper() == "A0":
+        target = bl + 0.5 * vect_x + (A0_Y_OFFSET / np.linalg.norm(vect_y)) * vect_y
+        target[2] += vertical_offset                   # apply vertical offset
+    else:
+        # --- Chess-style coordinate input ---
+        col_letter, row_num = position
+        col_idx = ord(col_letter.upper()) - ord('A')
+        if not (0 <= col_idx < num_squares_x):
+            raise ValueError(f"Invalid column '{col_letter}'. Must be A–H.")
+        row_idx = row_num - 1
+        if not (0 <= row_idx < num_squares_y):
+            raise ValueError(f"Invalid row '{row_num}'. Must be 1–8.")
 
-    # --- Chess-style coordinate input ---
-    # Expect something like ('A', 1) or ('G', 7)
-    col_letter, row_num = position
+        # Compute target position on board
+        target = (
+            bl
+            + vect_x * (col_idx / num_squares_x)
+            + vect_y * (row_idx / num_squares_y)
+        )
+        target[2] += vertical_offset  # add standard vertical offset
 
-    # Convert 'A'–'H' to 0–7
-    col_idx = ord(col_letter.upper()) - ord('A')
-    if not (0 <= col_idx < num_squares_x):
-        raise ValueError(f"Invalid column '{col_letter}'. Must be A–H.")
-
-    # Convert 1–8 to 0–7 (bottom→top)
-    row_idx = row_num - 1
-    if not (0 <= row_idx < num_squares_y):
-        raise ValueError(f"Invalid row '{row_num}'. Must be 1–8.")
-
-    # Compute target position
-    target = (
-        bl
-        + vect_x * (col_idx / num_squares_x)
-        + vect_y * (row_idx / num_squares_y)
-    )
-
-
-
-    # calculate the calculated q_des 
+    # Calculate inverse kinematics
     q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
 
     return q_des, target
-
 
 def get_user_chess_position():
     """
@@ -166,8 +180,6 @@ def get_user_chess_position():
         print(desired_move)
         return desired_move
 
-
-
 def record_end_effector_orientation(limb):
     """
     Prompts the user to move the Baxter end effector to the desired orientation,
@@ -192,8 +204,6 @@ def record_end_effector_orientation(limb):
     # print("shape: ", np.shape(tip_orientation))
 
     return tip_orientation
-
-
 
 def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=30.0):
     """
@@ -238,21 +248,109 @@ def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.00
         control_rate.sleep()
 
 
+def shutdown_robot(limb, gripper_client):
+    """
+    Safe shutdown procedure for Baxter.
+    """
+    rospy.loginfo("Shutting down Baxter safely...")
 
-if __name__ == '__main__':
+    # Stop all limb movements
+    if limb is not None:
+        try:
+            limb.stop_all_motors()
+            rospy.loginfo("Stopped all limb motors.")
+        except Exception as e:
+            rospy.logwarn(f"Failed to stop limb motors: {e}")
+
+    # Open gripper
+    if gripper_client is not None:
+        try:
+            grip(gripper_client, GRIPPER_OPEN)
+            rospy.sleep(1)
+            rospy.loginfo("Gripper opened for shutdown.")
+        except Exception as e:
+            rospy.logwarn(f"Failed to open gripper: {e}")
+
+    rospy.loginfo("Shutdown complete.")
+
+
+def main(args=None):
     rospy.init_node('me_537_lab')
+
+    # Initialize robot interfaces
     limb = RadBaxterLimb('right')
     gripper_client = create_gripper_client("right")
 
-    calibration = calibrate_corners(4, limb)
-    desired_quat = record_end_effector_orientation(limb)
-    desired_chess_location = get_user_chess_position()
-    q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
-    
-    # Optional: open gripper before moving
-    grip(gripper_client, 100)   # open
-    rospy.sleep(1)
+    # Register shutdown function
+    rospy.on_shutdown(lambda: shutdown_robot(limb, gripper_client))
 
-    move_to_q_des(limb, q_des, target, speed=.25)
+    # Initialize state machine
+    current_state = State.CALIBRATE
 
-    
+    calibration = None
+    desired_quat = None
+
+    try:
+        while not rospy.is_shutdown():
+            if current_state == State.CALIBRATE:
+                rospy.loginfo("Calibrating board corners...")
+                calibration = calibrate_corners(4, limb)
+                desired_quat = record_end_effector_orientation(limb)
+                current_state = State.MOVE_TO_BOARD
+
+            elif current_state == State.MOVE_TO_BOARD:
+                rospy.loginfo("Moving to initial board position...")
+                desired_chess_location = "A0"
+                q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+
+                grip(gripper_client, GRIPPER_OPEN)
+                rospy.sleep(1)
+
+                move_to_q_des(limb, q_des, target, speed=0.25)
+                current_state = State.START_MOVEMENT
+
+            elif current_state == State.START_MOVEMENT:
+                rospy.loginfo("Select current piece position...")
+                desired_chess_location = get_user_chess_position()
+                q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+
+                move_to_q_des(limb, q_des, target, speed=0.25)
+                current_state = State.GRAB_PIECE
+
+            elif current_state == State.GRAB_PIECE:
+                rospy.loginfo("Grabbing piece...")
+                grip(gripper_client, GRIPPER_CLOSED)
+                rospy.sleep(1)
+                current_state = State.PICK_UP
+
+            elif current_state == State.PICK_UP:
+                rospy.loginfo("Lifting piece...")
+                # Optionally move up a bit; can add function to increment Z
+                current_state = State.NEXT_MOVE
+
+            elif current_state == State.NEXT_MOVE:
+                rospy.loginfo("Select target position for piece...")
+                desired_chess_location = get_user_chess_position()
+                q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+
+                move_to_q_des(limb, q_des, target, speed=0.25)
+                current_state = State.PUT_DOWN
+
+            elif current_state == State.PUT_DOWN:
+                rospy.loginfo("Placing piece down...")
+                grip(gripper_client, GRIPPER_OPEN)
+                rospy.sleep(1)
+                current_state = State.RESET
+
+            elif current_state == State.RESET:
+                rospy.loginfo("Resetting state machine for next move...")
+                current_state = State.MOVE_TO_BOARD
+
+            rospy.sleep(0.1)
+
+    except rospy.ROSInterruptException:
+        # Ctrl+C pressed; handled by shutdown_robot
+        rospy.loginfo("ROSInterruptException caught. Exiting safely.")
+
+if __name__ == '__main__':
+    main()

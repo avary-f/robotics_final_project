@@ -1,32 +1,47 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+
 import rospy
-from baxter_interface import Gripper
+import actionlib
+from control_msgs.msg import GripperCommandAction, GripperCommandGoal
 
-# Initialize ROS node
-rospy.init_node('minimal_gripper_client')
+def send_goal(client, position, effort=-1.0):
+    """Send a goal to the gripper action server."""
+    goal = GripperCommandGoal()
+    goal.command.position = position   # 0.0 = closed, 100.0 = open
+    goal.command.max_effort = effort   # -1 uses default
+    client.send_goal(goal)
+    rospy.loginfo("Sent goal: position=%.1f effort=%.1f", position, effort)
 
-# Choose left or right arm
-arm = 'righ'
-gripper = Gripper(arm)
+def main():
+    rospy.init_node("gripper_cycle_action_client")
 
-# Calibrate if needed
-if not gripper.calibrated():
-    print("Calibrating gripper...")
-    gripper.calibrate()
-    rospy.sleep(2.0)
+    # Action server for RIGHT gripper
+    action_ns = "/robot/end_effector/right_gripper/gripper_action"
 
-# Move gripper to a position (0-100%)
-print("Moving gripper to 50%")
-gripper.command_position(50.0)
+    rospy.loginfo("Waiting for gripper action server...")
+    client = actionlib.SimpleActionClient(action_ns, GripperCommandAction)
+    client.wait_for_server()
+    rospy.loginfo("Connected to gripper action server.")
 
-# Fully open or close
-print("Closing gripper fully")
-gripper.close()
-rospy.sleep(1.0)
+    # ---- Close ----
+    rospy.loginfo("Closing gripper...")
+    send_goal(client, 0.0)   # 0 = closed
+    rospy.sleep(5.0)
 
-print("Opening gripper fully")
-gripper.open()
-rospy.sleep(1.0)
+    # ---- Open ----
+    rospy.loginfo("Opening gripper...")
+    send_goal(client, 100.0) # 100 = open
+    rospy.sleep(1.0)
+
+    rospy.loginfo("Done!")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
 
 
 

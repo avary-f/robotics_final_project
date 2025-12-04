@@ -32,6 +32,7 @@ catkin_install_python(PROGRAMS
   src/Gripper_Alyssa.py
   src/checkerboard_pose_pub.py
   src/checkerboard_mesh_pub.py
+  src/State_Machine_dev.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
