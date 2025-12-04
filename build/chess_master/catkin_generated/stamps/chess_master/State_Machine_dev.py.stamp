@@ -42,7 +42,7 @@ class CalibrationData:
 
 class State(Enum):
     CALIBRATE = "CALIBRATE"
-    MOVE_TO_BOARD = "MOVE_TO_BOARD"
+    NEUTRAL = "NEUTRAL"
     START_MOVEMENT = 'START_MOVEMENT'
     GRAB_PIECE = "GRAB_PIECE"
     PICK_UP = "PICK_UP"
@@ -205,7 +205,7 @@ def record_end_effector_orientation(limb):
 
     return tip_orientation
 
-def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=30.0):
+def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=130.0):
     """
     Move Baxter to the target joint angles q_des iteratively until the end-effector
     reaches the target position within a specified tolerance or timeout is exceeded.
@@ -296,9 +296,9 @@ def main(args=None):
                 rospy.loginfo("Calibrating board corners...")
                 calibration = calibrate_corners(4, limb)
                 desired_quat = record_end_effector_orientation(limb)
-                current_state = State.MOVE_TO_BOARD
+                current_state = State.START_MOVEMENT
 
-            elif current_state == State.MOVE_TO_BOARD:
+            elif current_state == State.NEUTRAL:
                 rospy.loginfo("Moving to initial board position...")
                 desired_chess_location = "A0"
                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
@@ -306,7 +306,7 @@ def main(args=None):
                 grip(gripper_client, GRIPPER_OPEN)
                 rospy.sleep(1)
 
-                move_to_q_des(limb, q_des, target, speed=0.25)
+                move_to_q_des(limb, q_des, target, speed=0.5)
                 current_state = State.START_MOVEMENT
 
             elif current_state == State.START_MOVEMENT:
@@ -344,7 +344,7 @@ def main(args=None):
 
             elif current_state == State.RESET:
                 rospy.loginfo("Resetting state machine for next move...")
-                current_state = State.MOVE_TO_BOARD
+                # current_state = State.NEUTRAL
 
             rospy.sleep(0.1)
 

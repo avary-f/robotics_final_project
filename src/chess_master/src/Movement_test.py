@@ -1,8 +1,12 @@
+#!/usr/bin/env python3
 ## This file is meant to test Baxter movement
 
 ## First task will be to just go to a point in space
 
 ## Second task will be to let us move the arm and get the q using ik 
+
+
+# TODO: make the error calculation and all movement calculations based on the location of the wrist and not the location of the tip
 
 #system level imports
 import sys, os
@@ -10,8 +14,6 @@ sys.path.append(os.path.expanduser('~/Desktop/robotics_ws/src/rad_baxter_limb/sr
 from collections import deque
 import numpy as np
 import scipy.io as sio
-#!/usr/local/bin/python
-
 from copy import deepcopy
 from threading import RLock, Timer
 import time
@@ -19,11 +21,13 @@ from math import pi
 from baxter_interface.limb import Limb
 from rad_baxter_limb.rad_baxter_limb import RadBaxterLimb
 from baxter_pykdl import baxter_kinematics as b_kin
+from trac_ik_python.trac_ik import IK
 import rospy
 import tf
 import actionlib
 from control_msgs.msg import GripperCommandAction, GripperCommandGoal
 
+GRIPPER_OFFSET = np.array([0.0, 0.0, -0.15])
 
 class CalibrationData:
     def __init__(self, angular=None, cartesian=None):
@@ -134,7 +138,17 @@ def calculate_position(position, limb, calibration, tip_orientation):
 
 
     # calculate the calculated q_des 
-    q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
+    # q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
+    # Use current joint angles as seed
+    seed = [limb.joint_angle(j) for j in limb.joint_names()]
+
+    # gripper_offset = np.array([0.0, 0.0, 0.15])  # adjust to your gripper
+    target_with_offset = target - GRIPPER_OFFSET  # move wrist back so tip ends at target
+    q_des = ik_solver.get_ik(
+        seed,
+        target_with_offset[0], target_with_offset[1], target_with_offset[2],
+        tip_orientation[0], tip_orientation[1], tip_orientation[2], tip_orientation[3]
+    )
 
     return q_des, target
 
@@ -195,7 +209,7 @@ def record_end_effector_orientation(limb):
 
 
 
-def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=30.0):
+def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.01, timeout=30.0):
     """
     Move Baxter to the target joint angles q_des iteratively until the end-effector
     reaches the target position within a specified tolerance or timeout is exceeded.
@@ -214,6 +228,9 @@ def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.00
     start_time = time.time()
     print(f"Moving to target position: {target}")
 
+    print("q_des:", q_des)
+    print("target:", target)
+
     while not rospy.is_shutdown():
         # Check timeout
         elapsed = time.time() - start_time
@@ -224,13 +241,15 @@ def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.00
         # Command Baxter to target joint angles
         limb.set_joint_positions_mod(q_des)
 
-        # Get current end-effector position
         current_pose = limb.get_kdl_forward_position_kinematics()
-        current_pos = np.array(current_pose[0:3])
+        current_wrist = np.array(current_pose[0:3])
 
-        # Compute Euclidean distance to target
-        error = np.linalg.norm(current_pos - target)
+        # # Compute tip position from wrist + gripper offset
+        # current_wrist = current_tip - GRIPPER_OFFSET
 
+        # Compute Euclidean distance to target tip
+        error = np.linalg.norm(current_wrist - target)
+        print(f"Tip position error: {error:.4f} m")
         if error <= position_tol:
             print(f"Reached target! Error: {error*1000:.2f} mm")
             break
@@ -242,6 +261,12 @@ def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.00
 if __name__ == '__main__':
     rospy.init_node('me_537_lab')
     limb = RadBaxterLimb('right')
+    ik_solver = IK(
+        "base",           # root link
+        "right_hand",     # tip link
+        timeout=0.015,
+        epsilon=1e-5
+    )
     gripper_client = create_gripper_client("right")
 
     calibration = calibrate_corners(4, limb)

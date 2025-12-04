@@ -69,6 +69,10 @@ if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/chess_master" TYPE PROGRAM FILES "/home/radlab/Documents/robotics_final_project/build/chess_master/catkin_generated/installspace/Trac_IK_test.py")
+endif()
+
+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/chess_master/meshes" TYPE DIRECTORY FILES "/home/radlab/Documents/robotics_final_project/src/chess_master/meshes/")
 endif()
 

@@ -25,6 +25,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/home/radlab/Documents/robotics_final_project/src/chess_master/package.xml"
   "/home/radlab/Documents/robotics_final_project/src/chess_master/src/Gripper_Alyssa.py"
   "/home/radlab/Documents/robotics_final_project/src/chess_master/src/State_Machine_dev.py"
+  "/home/radlab/Documents/robotics_final_project/src/chess_master/src/Trac_IK_test.py"
   "/home/radlab/Documents/robotics_final_project/src/chess_master/src/checkerboard_mesh_pub.py"
   "/home/radlab/Documents/robotics_final_project/src/chess_master/src/checkerboard_pose_pub.py"
   "/opt/ros/noetic/share/actionlib/cmake/actionlib-msg-extras.cmake"
