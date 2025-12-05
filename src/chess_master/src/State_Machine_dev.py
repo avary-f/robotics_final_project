@@ -26,11 +26,36 @@ from control_msgs.msg import GripperCommandAction, GripperCommandGoal
 from enum import Enum
 from trac_ik_python.trac_ik import IK
 
+CALIB_FILE = os.path.expanduser("~/baxter_calibration.npz")
+
+def save_calibration(calibration, desired_quat):
+    np.savez(
+        CALIB_FILE,
+        angular=calibration.angular,
+        cartesian=calibration.cartesian,
+        quat=np.array(desired_quat)
+    )
+    print(f"Calibration saved to {CALIB_FILE}")
+
+
+def load_calibration():
+    if not os.path.exists(CALIB_FILE):
+        return None, None
+
+    data = np.load(CALIB_FILE)
+    calibration = CalibrationData(
+        angular=data["angular"],
+        cartesian=data["cartesian"]
+    )
+    desired_quat = data["quat"].tolist()
+    print(f"Loaded calibration from {CALIB_FILE}")
+    return calibration, desired_quat
+
 
 
 # ------------------- CONFIGURABLE PARAMETERS -------------------
-GRIPPER_CLOSED = 20   # 0 = fully closed, adjust as needed
-GRIPPER_OPEN = 70    # 100 = fully open
+GRIPPER_CLOSED = 40   # 0 = fully closed, adjust as needed
+GRIPPER_OPEN = 100    # 100 = fully open
 # VERTICAL_OFFSET = 0.3048  # 1 foot in meters
 VERTICAL_OFFSET = .05
 A0_Y_OFFSET = -0.127      # 5 inches below board in meters
@@ -317,28 +342,46 @@ def compute_q_for_target_with_offset(limb, target, tip_orientation, z_offset=0.0
 
 #         control_rate.sleep()
 
-def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.01, timeout=30.0):
+def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.07, timeout=10.0):
+    """
+    Move Baxter to the target joint angles q_des iteratively until the end-effector
+    reaches the target position within a specified tolerance or timeout is exceeded.
+    
+    limb: RadBaxterLimb instance
+    q_des: target joint angles (7-element array)
+    target: target Cartesian position [x, y, z]
+    speed: maximum fraction of joint speed
+    rate_hz: control loop frequency
+    position_tol: tolerance in meters (1mm = 0.001 m)
+    timeout: maximum time to attempt movement (seconds)
+    """
     limb.set_joint_position_speed(speed)
     control_rate = rospy.Rate(rate_hz)
 
     start_time = time.time()
     print(f"Moving to target position: {target}")
 
+    print("q_des:", q_des)
+    print("target:", target)
+
     while not rospy.is_shutdown():
-        if time.time() - start_time > timeout:
-            print("Timeout reached, stopping movement.")
+        # Check timeout
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            print(f"Timeout reached ({timeout} sec). Stopping movement.")
             break
 
-        # Command movement
+        # Command Baxter to target joint angles
         limb.set_joint_positions_mod(q_des)
 
-        # Compute current wrist position
-        pose = limb.get_kdl_forward_position_kinematics()
-        current_wrist = np.array(pose[0:3])
+        current_pose = limb.get_kdl_forward_position_kinematics()
+        current_wrist = np.array(current_pose[0:3])
 
-        # Distance error between wrist and target
+        # # Compute tip position from wrist + gripper offset
+        # current_wrist = current_tip - GRIPPER_OFFSET
+
+        # Compute Euclidean distance to target tip
         error = np.linalg.norm(current_wrist - target)
-
         print(f"Tip position error: {error:.4f} m")
         if error <= position_tol:
             print(f"Reached target! Error: {error*1000:.2f} mm")
@@ -489,10 +532,26 @@ def main(args=None):
     try:
         while not rospy.is_shutdown():
             if current_state == State.CALIBRATE:
-                rospy.loginfo("Calibrating board corners...")
+                # Try loading previous calibration
+                calibration, desired_quat = load_calibration()
+
+                if calibration is not None:
+                    print("\nPrevious calibration found.")
+                    use_old = input("Use stored calibration? (y/n): ").strip().lower()
+
+                    if use_old == "y":
+                        current_state = State.START_MOVEMENT
+                        continue
+                    else:
+                        print("Re-calibrating...")
+                
+                # --- Perform new calibration ---
                 calibration = calibrate_corners(4, limb)
                 desired_quat = record_end_effector_orientation(limb)
+                save_calibration(calibration, desired_quat)
+
                 current_state = State.START_MOVEMENT
+
 
             elif current_state == State.NEUTRAL:
                 rospy.loginfo("Moving to initial board position...")
@@ -511,14 +570,15 @@ def main(args=None):
                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
 
                 # Compute IK for tip raised 0.05 m
-                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.15)
                 move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
 
                 current_state = State.GRAB_PIECE
 
             elif current_state == State.GRAB_PIECE:
                 rospy.loginfo("Grabbing piece...")
-                move_to_q_des(limb, q_des, target, speed=0.25)
+                move_to_q_des(limb, q_des, target, position_tol=.02, speed=0.25)
+                rospy.sleep(1)
                 grip(gripper_client, GRIPPER_CLOSED)
                 rospy.sleep(1)
                 current_state = State.PICK_UP
@@ -526,7 +586,7 @@ def main(args=None):
             elif current_state == State.PICK_UP:
                 rospy.loginfo("Lifting piece...")
                 # Raise tip 0.05 m for pickup
-                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.15)
                 move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
 
                 current_state = State.NEXT_MOVE
@@ -537,14 +597,15 @@ def main(args=None):
                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
 
                 # Raise tip 0.05 m above target
-                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.15)
                 move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
 
                 current_state = State.PUT_DOWN
 
             elif current_state == State.PUT_DOWN:
                 rospy.loginfo("Placing piece down...")
-                move_to_q_des(limb, q_des, target, speed=0.25)
+                move_to_q_des(limb, q_des, target, position_tol=.02, speed=0.25)
+                rospy.sleep(1)
                 grip(gripper_client, GRIPPER_OPEN)
                 rospy.sleep(1)
                 current_state = State.RESET
@@ -552,9 +613,11 @@ def main(args=None):
             elif current_state == State.RESET:
                 rospy.loginfo("Resetting state machine for next move...")
                 # Move back to raised neutral position
-                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.15)
                 move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
-                # Optionally set: current_state = State.NEUTRAL
+                current_state = State.START_MOVEMENT
+
+                
 
             rospy.sleep(0.1)
 
