@@ -24,6 +24,7 @@ import tf
 import actionlib
 from control_msgs.msg import GripperCommandAction, GripperCommandGoal
 from enum import Enum
+from trac_ik_python.trac_ik import IK
 
 
 
@@ -33,6 +34,7 @@ GRIPPER_OPEN = 70    # 100 = fully open
 # VERTICAL_OFFSET = 0.3048  # 1 foot in meters
 VERTICAL_OFFSET = .05
 A0_Y_OFFSET = -0.127      # 5 inches below board in meters
+GRIPPER_OFFSET = np.array([0.0, 0.0, -0.15])   # same as Movement_test.py
 
 
 class CalibrationData:
@@ -109,49 +111,94 @@ def calibrate_corners(num_trials, limb):
     # Return as CalibrationData object
     return CalibrationData(angular_calibration, cartesian_calibration)
 
-def calculate_position(position, limb, calibration, tip_orientation, vertical_offset=VERTICAL_OFFSET):
+# def calculate_position(position, limb, calibration, tip_orientation, vertical_offset=VERTICAL_OFFSET):
+#     num_squares_x = 8
+#     num_squares_y = 8
+
+#     # Extract 3D corner vectors from the calibration data
+#     bl = calibration.cartesian[:, 0]   # bottom-left
+#     tl = calibration.cartesian[:, 1]   # top-left
+#     br = calibration.cartesian[:, 2]   # bottom-right
+#     tr = calibration.cartesian[:, 3]   # top-right
+
+#     # Compute board vectors
+#     vect_x = (br - bl + tr - tl) / 2.0  # average x-axis direction (left→right)
+#     vect_y = (tl - bl + tr - br) / 2.0  # average y-axis direction (bottom→top)
+
+#     board_width = np.linalg.norm(vect_x)
+#     board_height = np.linalg.norm(vect_y)
+
+#     # Special case: "A0" goes above center of the board, 5 inches below board surface
+#     if isinstance(position, str) and position.upper() == "A0":
+#         target = bl + 0.5 * vect_x + (A0_Y_OFFSET / np.linalg.norm(vect_y)) * vect_y
+#         target[2] += vertical_offset                   # apply vertical offset
+#     else:
+#         # --- Chess-style coordinate input ---
+#         col_letter, row_num = position
+#         col_idx = ord(col_letter.upper()) - ord('A')
+#         if not (0 <= col_idx < num_squares_x):
+#             raise ValueError(f"Invalid column '{col_letter}'. Must be A–H.")
+#         row_idx = row_num - 1
+#         if not (0 <= row_idx < num_squares_y):
+#             raise ValueError(f"Invalid row '{row_num}'. Must be 1–8.")
+
+#         # Compute target position on board
+#         target = (
+#             bl
+#             + vect_x * (col_idx / num_squares_x)
+#             + vect_y * (row_idx / num_squares_y)
+#         )
+#         target[2] += vertical_offset  # add standard vertical offset
+
+#     # Calculate inverse kinematics
+#     q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
+
+#     return q_des, target
+
+def calculate_position(position, limb, calibration, tip_orientation):
     num_squares_x = 8
     num_squares_y = 8
 
-    # Extract 3D corner vectors from the calibration data
+    # Extract calibrated corner positions
     bl = calibration.cartesian[:, 0]   # bottom-left
     tl = calibration.cartesian[:, 1]   # top-left
     br = calibration.cartesian[:, 2]   # bottom-right
     tr = calibration.cartesian[:, 3]   # top-right
 
-    # Compute board vectors
-    vect_x = (br - bl + tr - tl) / 2.0  # average x-axis direction (left→right)
-    vect_y = (tl - bl + tr - br) / 2.0  # average y-axis direction (bottom→top)
+    # Compute board axes
+    vect_x = (br - bl + tr - tl) / 2.0
+    vect_y = (tl - bl + tr - br) / 2.0
 
-    board_width = np.linalg.norm(vect_x)
-    board_height = np.linalg.norm(vect_y)
+    # --- Chess-style coordinate input (A1, H8, etc.) ---
+    col_letter, row_num = position
 
-    # Special case: "A0" goes above center of the board, 5 inches below board surface
-    if isinstance(position, str) and position.upper() == "A0":
-        target = bl + 0.5 * vect_x + (A0_Y_OFFSET / np.linalg.norm(vect_y)) * vect_y
-        target[2] += vertical_offset                   # apply vertical offset
-    else:
-        # --- Chess-style coordinate input ---
-        col_letter, row_num = position
-        col_idx = ord(col_letter.upper()) - ord('A')
-        if not (0 <= col_idx < num_squares_x):
-            raise ValueError(f"Invalid column '{col_letter}'. Must be A–H.")
-        row_idx = row_num - 1
-        if not (0 <= row_idx < num_squares_y):
-            raise ValueError(f"Invalid row '{row_num}'. Must be 1–8.")
+    col_idx = ord(col_letter.upper()) - ord('A')
+    row_idx = row_num - 1
 
-        # Compute target position on board
-        target = (
-            bl
-            + vect_x * (col_idx / num_squares_x)
-            + vect_y * (row_idx / num_squares_y)
-        )
-        target[2] += vertical_offset  # add standard vertical offset
+    # Compute ground-truth target (tip/gripper position)
+    target = (
+        bl
+        + vect_x * (col_idx / num_squares_x)
+        + vect_y * (row_idx / num_squares_y)
+    )
 
-    # Calculate inverse kinematics
-    q_des = limb.kin_kdl.inverse_kinematics(target, tip_orientation)
+    # Compute wrist target (move back by gripper offset)
+    target_with_offset = target - GRIPPER_OFFSET
+
+    # Seed solution = current joint angles
+    seed = [limb.joint_angle(j) for j in limb.joint_names()]
+
+    # Compute IK
+    q_des = ik_solver.get_ik(
+        seed,
+        target_with_offset[0], target_with_offset[1], target_with_offset[2],
+        tip_orientation[0], tip_orientation[1], tip_orientation[2], tip_orientation[3]
+    )
 
     return q_des, target
+
+
+
 
 def get_user_chess_position():
     """
@@ -205,19 +252,72 @@ def record_end_effector_orientation(limb):
 
     return tip_orientation
 
-def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=130.0):
+
+
+def compute_q_for_target_with_offset(limb, target, tip_orientation, z_offset=0.05):
     """
-    Move Baxter to the target joint angles q_des iteratively until the end-effector
-    reaches the target position within a specified tolerance or timeout is exceeded.
+    Compute joint angles so that the tip reaches target + vertical offset,
+    taking GRIPPER_OFFSET into account.
+    """
+    target_offset = target.copy()
+    target_offset[2] += z_offset
+    target_with_gripper_offset = target_offset - GRIPPER_OFFSET
+    seed = [limb.joint_angle(j) for j in limb.joint_names()]
+    q_des_offset = ik_solver.get_ik(
+        seed,
+        target_with_gripper_offset[0],
+        target_with_gripper_offset[1],
+        target_with_gripper_offset[2],
+        tip_orientation[0],
+        tip_orientation[1],
+        tip_orientation[2],
+        tip_orientation[3]
+    )
+    return q_des_offset, target_offset
+
+# def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.001, timeout=130.0):
+#     """
+#     Move Baxter to the target joint angles q_des iteratively until the end-effector
+#     reaches the target position within a specified tolerance or timeout is exceeded.
     
-    limb: RadBaxterLimb instance
-    q_des: target joint angles (7-element array)
-    target: target Cartesian position [x, y, z]
-    speed: maximum fraction of joint speed
-    rate_hz: control loop frequency
-    position_tol: tolerance in meters (1mm = 0.001 m)
-    timeout: maximum time to attempt movement (seconds)
-    """
+#     limb: RadBaxterLimb instance
+#     q_des: target joint angles (7-element array)
+#     target: target Cartesian position [x, y, z]
+#     speed: maximum fraction of joint speed
+#     rate_hz: control loop frequency
+#     position_tol: tolerance in meters (1mm = 0.001 m)
+#     timeout: maximum time to attempt movement (seconds)
+#     """
+#     limb.set_joint_position_speed(speed)
+#     control_rate = rospy.Rate(rate_hz)
+
+#     start_time = time.time()
+#     print(f"Moving to target position: {target}")
+
+#     while not rospy.is_shutdown():
+#         # Check timeout
+#         elapsed = time.time() - start_time
+#         if elapsed > timeout:
+#             print(f"Timeout reached ({timeout} sec). Stopping movement.")
+#             break
+
+#         # Command Baxter to target joint angles
+#         limb.set_joint_positions_mod(q_des)
+
+#         # Get current end-effector position
+#         current_pose = limb.get_kdl_forward_position_kinematics()
+#         current_pos = np.array(current_pose[0:3])
+
+#         # Compute Euclidean distance to target
+#         error = np.linalg.norm(current_pos - target)
+
+#         if error <= position_tol:
+#             print(f"Reached target! Error: {error*1000:.2f} mm")
+#             break
+
+#         control_rate.sleep()
+
+def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.01, timeout=30.0):
     limb.set_joint_position_speed(speed)
     control_rate = rospy.Rate(rate_hz)
 
@@ -225,27 +325,27 @@ def move_to_q_des(limb, q_des, target, speed=0.5, rate_hz=500, position_tol=0.00
     print(f"Moving to target position: {target}")
 
     while not rospy.is_shutdown():
-        # Check timeout
-        elapsed = time.time() - start_time
-        if elapsed > timeout:
-            print(f"Timeout reached ({timeout} sec). Stopping movement.")
+        if time.time() - start_time > timeout:
+            print("Timeout reached, stopping movement.")
             break
 
-        # Command Baxter to target joint angles
+        # Command movement
         limb.set_joint_positions_mod(q_des)
 
-        # Get current end-effector position
-        current_pose = limb.get_kdl_forward_position_kinematics()
-        current_pos = np.array(current_pose[0:3])
+        # Compute current wrist position
+        pose = limb.get_kdl_forward_position_kinematics()
+        current_wrist = np.array(pose[0:3])
 
-        # Compute Euclidean distance to target
-        error = np.linalg.norm(current_pos - target)
+        # Distance error between wrist and target
+        error = np.linalg.norm(current_wrist - target)
 
+        print(f"Tip position error: {error:.4f} m")
         if error <= position_tol:
             print(f"Reached target! Error: {error*1000:.2f} mm")
             break
 
         control_rate.sleep()
+
 
 
 def shutdown_robot(limb, gripper_client):
@@ -274,13 +374,109 @@ def shutdown_robot(limb, gripper_client):
     rospy.loginfo("Shutdown complete.")
 
 
+# def main(args=None):
+#     rospy.init_node('me_537_lab')
+
+#     # Initialize robot interfaces
+#     limb = RadBaxterLimb('right')
+#     gripper_client = create_gripper_client("right")
+    
+
+#     # Register shutdown function
+#     rospy.on_shutdown(lambda: shutdown_robot(limb, gripper_client))
+
+#     # Initialize state machine
+#     current_state = State.CALIBRATE
+
+#     calibration = None
+#     desired_quat = None
+
+#     try:
+#         while not rospy.is_shutdown():
+#             if current_state == State.CALIBRATE:
+#                 rospy.loginfo("Calibrating board corners...")
+#                 calibration = calibrate_corners(4, limb)
+#                 desired_quat = record_end_effector_orientation(limb)
+#                 current_state = State.START_MOVEMENT
+
+#             elif current_state == State.NEUTRAL:
+#                 rospy.loginfo("Moving to initial board position...")
+#                 desired_chess_location = "A0"
+#                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+
+#                 grip(gripper_client, GRIPPER_OPEN)
+#                 rospy.sleep(1)
+
+#                 move_to_q_des(limb, q_des, target, speed=0.5)
+#                 current_state = State.START_MOVEMENT
+
+#             elif current_state == State.START_MOVEMENT:
+#                 rospy.loginfo("Select current piece position...")
+#                 desired_chess_location = get_user_chess_position()
+
+#                 # Get joint angles and original target from calculate_position
+#                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+
+#                 q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+#                 move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
+
+#                 # Move the arm using the same joint angles (wrist is already positioned correctly)
+#                 move_to_q_des(limb, q_des, target_offset, speed=0.25)
+
+#                 current_state = State.GRAB_PIECE
+
+#             elif current_state == State.GRAB_PIECE:
+#                 rospy.loginfo("Grabbing piece...")
+#                 move_to_q_des(limb, q_des, target, speed=0.25)
+#                 grip(gripper_client, GRIPPER_CLOSED)
+#                 rospy.sleep(1)
+#                 current_state = State.PICK_UP
+
+#             elif current_state == State.PICK_UP:
+#                 rospy.loginfo("Lifting piece...")
+#                 move_to_q_des(limb, q_des, target_offset, speed=0.25)
+#                 # Optionally move up a bit; can add function to increment Z
+#                 current_state = State.NEXT_MOVE
+
+#             elif current_state == State.NEXT_MOVE:
+#                 rospy.loginfo("Select target position for piece...")
+#                 desired_chess_location = get_user_chess_position()
+#                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
+
+#                 # Apply additional vertical offset to the target tip position
+#                 vertical_offset = 0.05
+#                 target_offset = target.copy()           # don't modify original target
+#                 target_offset[2] += vertical_offset     # raise tip by 0.05 m
+
+#                 move_to_q_des(limb, q_des, target, speed=0.25)
+#                 current_state = State.PUT_DOWN
+
+#             elif current_state == State.PUT_DOWN:
+#                 rospy.loginfo("Placing piece down...")
+#                 move_to_q_des(limb, q_des, target, speed=0.25)
+#                 grip(gripper_client, GRIPPER_OPEN)
+#                 rospy.sleep(1)
+#                 current_state = State.RESET
+
+#             elif current_state == State.RESET:
+#                 rospy.loginfo("Resetting state machine for next move...")
+#                 move_to_q_des(limb, q_des, target_offset, speed=0.25)
+#                 # current_state = State.NEUTRAL
+
+#             rospy.sleep(0.1)
+
+#     except rospy.ROSInterruptException:
+#         # Ctrl+C pressed; handled by shutdown_robot
+#         rospy.loginfo("ROSInterruptException caught. Exiting safely.")
+
+
 def main(args=None):
     rospy.init_node('me_537_lab')
 
     # Initialize robot interfaces
     limb = RadBaxterLimb('right')
     gripper_client = create_gripper_client("right")
-
+    
     # Register shutdown function
     rospy.on_shutdown(lambda: shutdown_robot(limb, gripper_client))
 
@@ -314,18 +510,25 @@ def main(args=None):
                 desired_chess_location = get_user_chess_position()
                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
 
-                move_to_q_des(limb, q_des, target, speed=0.25)
+                # Compute IK for tip raised 0.05 m
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
+
                 current_state = State.GRAB_PIECE
 
             elif current_state == State.GRAB_PIECE:
                 rospy.loginfo("Grabbing piece...")
+                move_to_q_des(limb, q_des, target, speed=0.25)
                 grip(gripper_client, GRIPPER_CLOSED)
                 rospy.sleep(1)
                 current_state = State.PICK_UP
 
             elif current_state == State.PICK_UP:
                 rospy.loginfo("Lifting piece...")
-                # Optionally move up a bit; can add function to increment Z
+                # Raise tip 0.05 m for pickup
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
+
                 current_state = State.NEXT_MOVE
 
             elif current_state == State.NEXT_MOVE:
@@ -333,24 +536,39 @@ def main(args=None):
                 desired_chess_location = get_user_chess_position()
                 q_des, target = calculate_position(desired_chess_location, limb, calibration, desired_quat)
 
-                move_to_q_des(limb, q_des, target, speed=0.25)
+                # Raise tip 0.05 m above target
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
+
                 current_state = State.PUT_DOWN
 
             elif current_state == State.PUT_DOWN:
                 rospy.loginfo("Placing piece down...")
+                move_to_q_des(limb, q_des, target, speed=0.25)
                 grip(gripper_client, GRIPPER_OPEN)
                 rospy.sleep(1)
                 current_state = State.RESET
 
             elif current_state == State.RESET:
                 rospy.loginfo("Resetting state machine for next move...")
-                # current_state = State.NEUTRAL
+                # Move back to raised neutral position
+                q_des_offset, target_offset = compute_q_for_target_with_offset(limb, target, desired_quat, z_offset=0.05)
+                move_to_q_des(limb, q_des_offset, target_offset, speed=0.25)
+                # Optionally set: current_state = State.NEUTRAL
 
             rospy.sleep(0.1)
 
     except rospy.ROSInterruptException:
-        # Ctrl+C pressed; handled by shutdown_robot
         rospy.loginfo("ROSInterruptException caught. Exiting safely.")
 
+
+
+
 if __name__ == '__main__':
+    ik_solver = IK(
+        "base",
+        "right_hand",
+        timeout=0.15,
+        epsilon=1e-5
+    )
     main()
