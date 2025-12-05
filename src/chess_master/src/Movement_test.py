@@ -16,7 +16,7 @@ import numpy as np
 import scipy.io as sio
 from copy import deepcopy
 from threading import RLock, Timer
-import time
+import time0
 from math import pi
 from baxter_interface.limb import Limb
 from rad_baxter_limb.rad_baxter_limb import RadBaxterLimb
@@ -27,7 +27,7 @@ import tf
 import actionlib
 from control_msgs.msg import GripperCommandAction, GripperCommandGoal
 
-GRIPPER_OFFSET = np.array([0.0, 0.0, -0.15])
+GRIPPER_OFFSET = np.array([0.0, 0.0, 0.155])
 
 class CalibrationData:
     def __init__(self, angular=None, cartesian=None):
@@ -143,7 +143,7 @@ def calculate_position(position, limb, calibration, tip_orientation):
     seed = [limb.joint_angle(j) for j in limb.joint_names()]
 
     # gripper_offset = np.array([0.0, 0.0, 0.15])  # adjust to your gripper
-    target_with_offset = target - GRIPPER_OFFSET  # move wrist back so tip ends at target
+    target_with_offset = target + GRIPPER_OFFSET  # move wrist back so tip ends at target
     q_des = ik_solver.get_ik(
         seed,
         target_with_offset[0], target_with_offset[1], target_with_offset[2],
@@ -263,7 +263,8 @@ if __name__ == '__main__':
     limb = RadBaxterLimb('right')
     ik_solver = IK(
         "base",           # root link
-        "right_hand",     # tip link
+        # "right_hand",     # wrist link
+        "right_gripper",
         timeout=0.015,
         epsilon=1e-5
     )
@@ -279,5 +280,4 @@ if __name__ == '__main__':
     rospy.sleep(1)
 
     move_to_q_des(limb, q_des, target, speed=.25)
-
     
