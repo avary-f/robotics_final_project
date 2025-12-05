@@ -25,7 +25,7 @@ K = np.array(calib_data['camera_matrix']['data']).reshape(3, 3)
 D = np.array(calib_data['distortion_coefficents']['data'])
 
 # --- Checkerboard setup ---
-CHECKERBOARD = (7, 6)   # inner corners
+CHECKERBOARD = (7, 7)   # inner corners
 SQUARE_SIZE = 0.024     # meters
 
 # Prepare object points (3D points of checkerboard corners)
